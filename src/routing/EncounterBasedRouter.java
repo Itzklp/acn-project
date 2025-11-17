@@ -1,6 +1,5 @@
 /*
- * Copyright 2025 Your Name
- * Released under GPLv3. See LICENSE.txt for details.
+ * Corrected Encounter-Based Routing (EBR) implementation
  */
 package routing;
 
@@ -15,15 +14,8 @@ import core.Message;
 import core.Settings;
 
 /**
- * Corrected Encounter-Based Routing (EBR) implementation based on:
- * Nelson, S.C.; Bakht, M.; Kravets, R. "Encounter-based routing in DTNs".
- * INFOCOM 2009, pp. 846–854.
- *
- * Features:
- * - Delivery probability table per host
- * - Aging/decay of probabilities
- * - Transitivity updates
- * - Forwarding if probability at neighbor is higher or unknown
+ * Encounter-Based Routing (EBR) implementation.
+ * Based on: Nelson, S.C.; Bakht, M.; Kravets, R. "Encounter-based routing in DTNs".
  */
 public class EncounterBasedRouter extends ActiveRouter {
 
@@ -151,6 +143,19 @@ public class EncounterBasedRouter extends ActiveRouter {
         if (otherProb > myProb || otherProb == 0.0) {
             startTransfer(msg, con);
         }
+    }
+
+    /**
+     * Gets the delivery probability for a specific destination host.
+     * This method is required by EBREMRTRouter.
+     * @param host The destination host
+     * @return The probability (0.0 to 1.0)
+     */
+    public double getPredFor(DTNHost host) {
+        if (deliveryProbabilities == null) {
+            return 0.0;
+        }
+        return deliveryProbabilities.getOrDefault(host, 0.0);
     }
 
     @Override

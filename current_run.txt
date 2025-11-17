@@ -115,4 +115,11 @@ GUI.UnderlayImage.fileName = data/helsinki_underlay.png
 GUI.UnderlayImage.offset = 64, 20
 GUI.UnderlayImage.scale = 4.75
 GUI.UnderlayImage.rotate = -0.015
-GUI.EventLogPanel.nrofEvents = 100
+GUI.EventLogPanel.nrofEvents = 100 
+# --- Experiment Overrides --- 
+Group.router = DBRPRouter 
+Group1.nrofHosts = 16 
+Group2.nrofHosts = 16 
+Group3.nrofHosts = 16 
+Events1.hosts = 0,47 
+Scenario.name = DBRPRouter_50 
