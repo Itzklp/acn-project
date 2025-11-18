@@ -1,0 +1,20 @@
+Message stats for scenario SprayAndWaitEMRTRouter_150
+sim_time: 43200.0000
+created: 1460
+started: 2459
+relayed: 2452
+aborted: 7
+dropped: 2987
+removed: 0
+delivered: 659
+delivery_prob: 0.4514
+response_prob: 0.0000
+overhead_ratio: 2.7208
+latency_avg: 1617.1662
+latency_med: 1470.0000
+hopcount_avg: 1.6525
+hopcount_med: 2
+buffertime_avg: 3480.6903
+buffertime_med: 3549.0000
+rtt_avg: NaN
+rtt_med: NaN
