@@ -147,11 +147,10 @@ public class EBREMRTRouter extends EncounterBasedRouter {
         // Or simply raw TTL in minutes to match magnitude of Energy? 
         // Paper example uses TTL=8. 8 mins? 8 hours? 
         // We will use TTL in Minutes.
-        double ttlVal = msg.getTtl() / 60.0; 
-        
+        double ttlVal = msg.getTtl() / 3600.0; // Scale TTL to Hours (60 min = 1.0 hour)        
         // Energy Level (assuming simulation uses 0-100 or similar scale)
         // ONE's energy model might differ. We assume current/max * 100.
-        double energyVal = 100.0; // Default if no energy model
+        double energyVal = 5.0; // Default if no energy model
         // Check if energy model exists
         // (This requires casting or accessing a known energy model interface if strictly needed,
         //  but for standard ONE ActiveRouter, we might not have direct access. 

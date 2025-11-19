@@ -1,67 +1,163 @@
+import os
+import re
+import math
 import matplotlib.pyplot as plt
 
-# ---------------------------------------------
-# DATASETS (filled using your extracted results)
-# ---------------------------------------------
+REPORTS_DIR = "reports/"
 
-nodes = [50, 100, 150, 200, 250]
+# ------------------------------------------------------------
+# FLEXIBLE FLOAT REGEX: matches numbers, scientific form, NaN
+# ------------------------------------------------------------
+float_pattern = r"([-+]?(?:\d*\.\d+|\d+)(?:[eE][-+]?\d+)?|NaN|nan|INF|inf)"
 
-protocols = {
-    "Spray and Wait": {
-        "delivery": [0.7420, 0.8172, 0.8370, 0.8313, 0.8512],
-        "overhead": [8.6182, 8.3213, 8.1989, 8.3127, 8.1371],
-        "latency":  [1635.8450, 1471.0084, 1379.8245, 1386.5198, 1300.2382]
-    },
-    "EBR": {
-        "delivery": [0.4833, 0.4833, 0.9247, 0.9588, 0.9754],
-        "overhead": [28.7797, 28.7797, 108.7659, 152.3240, 190.8915],
-        "latency":  [1965.3044, 1965.3044, 1412.5148, 1234.9857, 984.9251]
-    },
-    "DBRP": {
-        "delivery": [0.1340, 0.1288, 0.1314, 0.1307, 0.1431],
-        "overhead": [3.4084, 3.7397, 3.7211, 3.7731, 3.4466],
-        "latency":  [909.9971, 828.8933, 930.9163, 946.1298, 960.2344]
+delivery_re = re.compile(rf"delivery_prob\s*:\s*{float_pattern}", re.IGNORECASE)
+overhead_re = re.compile(rf"overhead_ratio\s*:\s*{float_pattern}", re.IGNORECASE)
+latency_re = re.compile(rf"latency_avg\s*:\s*{float_pattern}", re.IGNORECASE)
+
+protocols = {}
+
+# --------------------------------------------------
+# SAFE FLOAT CONVERSION
+# --------------------------------------------------
+def to_float(x):
+    try:
+        v = float(x)
+        if math.isnan(v):
+            return None
+        return v
+    except:
+        return None
+
+
+# --------------------------------------------------
+# STEP 1 — Parse all MessageStatsReport files only
+# --------------------------------------------------
+for filename in os.listdir(REPORTS_DIR):
+    if not filename.endswith("MessageStatsReport.txt"):
+        continue
+
+    parts = filename.split("_")
+
+    if len(parts) < 3:
+        print("Skipping bad filename:", filename)
+        continue
+
+    if not parts[1].isdigit():
+        print("Skipping invalid file (node count not numeric):", filename)
+        continue
+
+    protocol_name = parts[0]
+    node_count = int(parts[1])
+
+    if protocol_name not in protocols:
+        protocols[protocol_name] = {}
+
+    content = open(os.path.join(REPORTS_DIR, filename)).read()
+
+    d = delivery_re.search(content)
+    o = overhead_re.search(content)
+    l = latency_re.search(content)
+
+    if not d or not o or not l:
+        print("Skipping file (missing fields):", filename)
+        continue
+
+    delivery = to_float(d.group(1))
+    overhead = to_float(o.group(1))
+    latency = to_float(l.group(1))
+
+    if delivery is None or overhead is None or latency is None:
+        print("Skipping file (invalid numeric data):", filename)
+        continue
+
+    protocols[protocol_name][node_count] = {
+        "delivery": delivery,
+        "overhead": overhead,
+        "latency": latency
     }
-}
 
-protocols_emrt = {
-    "Spray and Wait-EMRT": {
-        "delivery": [0.4560, 0.4405, 0.4514, 0.4444, 0.4648],
-        "overhead": [2.9895, 2.8159, 2.7208, 2.7716, 2.6960],
-        "latency":  [1652.1490, 1619.3518, 1617.1662, 1651.9722, 1526.1733]
-    },
-    "EBR-EMRT": {
-        "delivery": [0.4519, 0.6296, 0.7034, 0.6612, 0.6560],
-        "overhead": [22.6269, 50.6747, 84.7507, 107.9782, 117.8169],
-        "latency":  [1985.7349, 1870.0158, 1520.2843, 1409.3169, 1306.2721]
-    },
-    "DBRP-EMRT": {
-        "delivery": [0.1343, 0.1290, 0.1314, 0.1308, 0.1432],
-        "overhead": [3.4040, 3.7354, 3.7221, 3.7690, 3.4429],
-        "latency":  [909.9978, 830.6792, 932.0988, 948.8757, 959.2012]
-    }
-}
 
-# ---------------------------------------------
-# Helper function to plot each metric
-# ---------------------------------------------
+# --------------------------------------------------
+# STEP 2 — Classify protocols (Base vs EMRT)
+# --------------------------------------------------
+base_protocols = []
+emrt_protocols = []
 
-def plot_metric(metric_key, ylabel, title):
+for name in protocols.keys():
+    if "EMRT" in name.upper():
+        emrt_protocols.append(name)
+    else:
+        base_protocols.append(name)
+
+base_protocols.sort()
+emrt_protocols.sort()
+
+
+# --------------------------------------------------
+# STEP 3 — Plotting helper
+# --------------------------------------------------
+def plot_metric(metric, ylabel, title):
     plt.figure(figsize=(8, 5))
 
-    color_map = {}
+    color_map = {}  # base → color
 
-    # Base protocols (solid)
-    for proto, metrics in protocols.items():
-        line = plt.plot(nodes, metrics[metric_key], marker='o', label=proto)
+    # ------------ BASE PROTOCOLS ------------
+    for proto in base_protocols:
+        data = protocols.get(proto, {})
+        nodes_sorted = sorted(data.keys())
+
+        if len(nodes_sorted) == 0:
+            print("Skipping base proto (no data):", proto)
+            continue
+
+        values = [data[n][metric] for n in nodes_sorted]
+
+        line = plt.plot(
+            nodes_sorted,
+            values,
+            marker='o',
+            markersize=7,
+            label=proto,
+            alpha=0.90,             # slightly transparent
+            linewidth=2,
+        )
+
         color_map[proto] = line[0].get_color()
 
-    # EMRT (same color, dotted)
-    for proto, metrics in protocols_emrt.items():
-        base = proto.replace("-EMRT", "")
-        plt.plot(nodes, metrics[metric_key], marker='o',
-                 linestyle='dotted', color=color_map[base], label=proto)
+    # ------------ EMRT PROTOCOLS ------------
+    for proto in emrt_protocols:
+        data = protocols.get(proto, {})
+        nodes_sorted = sorted(data.keys())
 
+        if len(nodes_sorted) == 0:
+            print("Skipping emrt proto (no data):", proto)
+            continue
+
+        # match EMRT to correct base by removing "EMRT"
+        match = None
+        reduced = proto.lower().replace("emrt", "")
+        for base in base_protocols:
+            if base.lower() in reduced:
+                match = base
+                break
+
+        color = color_map.get(match, None)
+
+        values = [data[n][metric] for n in nodes_sorted]
+
+        plt.plot(
+            nodes_sorted,
+            values,
+            marker='o',
+            markersize=7,
+            linestyle='dotted',
+            label=proto,
+            color=color,
+            alpha=0.50,          # more transparent for EMRT
+            linewidth=2,
+        )
+
+    # ---------------------------------------
     plt.title(title)
     plt.xlabel("Number of Nodes")
     plt.ylabel(ylabel)
@@ -71,10 +167,9 @@ def plot_metric(metric_key, ylabel, title):
     plt.show()
 
 
-# ---------------------------------------------
-# Generate the 3 graphs
-# ---------------------------------------------
-
+# --------------------------------------------------
+# STEP 4 — Generate plots
+# --------------------------------------------------
 plot_metric("delivery", "Delivery Ratio", "Nodes vs Delivery Ratio")
 plot_metric("overhead", "Overhead Ratio", "Nodes vs Overhead Ratio")
 plot_metric("latency", "Average Latency (ms)", "Nodes vs Average Latency")
