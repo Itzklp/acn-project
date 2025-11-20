@@ -41,7 +41,7 @@ Scenario.nrofHostGroups = 3
 
 ## Group-specific settings:
 # SCALING FIX: ShortestPath ensures nodes mix, allowing density to improve delivery
-Group.movementModel = ShortestPathMapBasedMovement
+Group.movementModel = RandomWaypoint
 Group.router = SprayAndWaitRouter
 Group.bufferSize = 20971520
 Group.waitTime = 0, 120
@@ -85,7 +85,7 @@ Events1.prefix = M
 ## Movement model settings
 MovementModel.rngSeed = 1
 MovementModel.worldSize = 5000, 3500
-MovementModel.warmup = 1000
+MovementModel.warmup = 0
 
 ## Map based movement
 MapBasedMovement.nrofMapFiles = 4

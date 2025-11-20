@@ -149,7 +149,7 @@ public class SprayAndWaitEMRTRouter extends ActiveRouter {
         
         // Normalization:
         double bVal = this.bAvg * 100.0; // Buffer percentage (0-100)
-        double ttlVal = msg.getTtl() / 3600.0; // Scale TTL to Hours (60 min = 1.0 hour)
+        double ttlVal = msg.getTtl() / 60; // Scale TTL to Hours (60 min = 1.0 hour)
         double energyVal = 5.0; // Assumed energy percentage (0-100)
         
         // Calculate M_i
