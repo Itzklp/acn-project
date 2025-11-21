@@ -1,64 +1,80 @@
 #!/bin/bash
-# ==========================================
-# Automated Experiment Script (BASE ONLY)
-# Runs: SprayAndWait, EBR, DBRP
-# Across 5 densities — Batch Mode Enabled
-# ==========================================
 
-DENSITIES="50 100 150 200 250"
+DENSITIES="150 200 250"
 
-# ------------------------------------------
-# Helper function for BASE protocols
-# ------------------------------------------
-run_sim() {
+run_sim_base() {
     ROUTER=$1
     TOTAL_NODES=$2
-    
+
     PER_GROUP=$((TOTAL_NODES / 3))
     REAL_TOTAL=$((PER_GROUP * 3))
     MAX_HOST_ID=$((REAL_TOTAL - 1))
 
-    echo "[BASE] Running $ROUTER with ~$REAL_TOTAL nodes..."
+    echo "[BASE] Running $ROUTER with $TOTAL_NODES nodes..."
 
-    cp -f default_settings.txt current_run.txt
-    
+    REPORT_DIR="reports/base/${ROUTER}/${TOTAL_NODES}"
+    mkdir -p "$REPORT_DIR"
+
+    CONFIG_FILE="configs/base_${ROUTER}_${TOTAL_NODES}.txt"
+    mkdir -p configs
+    cp base_config.txt "$CONFIG_FILE"
+
     {
         echo ""
-        echo "# --- BASE Protocol Overrides ---"
+        echo "# --- Base Experiment Overrides ---"
         echo "Group.router = $ROUTER"
         echo "Group1.nrofHosts = $PER_GROUP"
         echo "Group2.nrofHosts = $PER_GROUP"
         echo "Group3.nrofHosts = $PER_GROUP"
         echo "Events1.hosts = 0,$MAX_HOST_ID"
-        echo "Scenario.name = ${ROUTER}_${TOTAL_NODES}"
-    } >> current_run.txt
+        echo "Events1.tohosts = 0,$MAX_HOST_ID"
+        echo "Scenario.name = ${ROUTER}_${TOTAL_NODES}_BASE"
+        echo "Report.reportDir = $REPORT_DIR"
+    } >> "$CONFIG_FILE"
 
-    # Spray-and-Wait has a special parameter
-    if [ "$ROUTER" == "SprayAndWaitRouter" ]; then
-        echo "SprayAndWaitRouter.nrofCopies = 8" >> current_run.txt
+    # Router-Specific Parameters
+    if [[ "$ROUTER" == "SprayAndWaitRouter" ]]; then
+        {
+            echo "SprayAndWaitRouter.nrofCopies = 8"
+            echo "SprayAndWaitRouter.binaryMode = true"
+        } >> "$CONFIG_FILE"
     fi
 
-    # 🚀 Run The ONE in non-interactive batch mode
-    sh one.sh -b 1 current_run.txt
+    if [[ "$ROUTER" == "EncounterBasedRouter" ]]; then
+        {
+            echo "EncounterBasedRouter.initMax = 10"
+            echo "EncounterBasedRouter.updateInterval = 30"
+            echo "EncounterBasedRouter.gamma = 0.85"
+        } >> "$CONFIG_FILE"
+    fi
+
+    if [[ "$ROUTER" == "DBRPRouter" ]]; then
+        {
+            echo "DBRPRouter.initCopies = 11"
+            echo "DBRPRouter.updateInterval = 30"
+        } >> "$CONFIG_FILE"
+    fi
+
+    sh one.sh -b 1 "$CONFIG_FILE"
 }
 
-# ------------------------------------------
-# Run BASE Protocols Only
-# ------------------------------------------
-for n in $DENSITIES; do
-    run_sim SprayAndWaitRouter $n
-done
+echo "=========================================="
+echo "Running BASE Protocol Simulations"
+echo "=========================================="
+
+# for n in $DENSITIES; do
+#     run_sim_base SprayAndWaitRouter $n
+# done
 
 for n in $DENSITIES; do
-    run_sim EncounterBasedRouter $n
+    run_sim_base EncounterBasedRouter $n
 done
 
-for n in $DENSITIES; do
-    run_sim DBRPRouter $n
-done
+# for n in $DENSITIES; do
+#     run_sim_base DBRPRouter $n
+# done
 
 echo ""
 echo "=========================================="
-echo "All BASE protocol simulations completed!"
-echo "Check the 'reports/' folder."
+echo "All BASE simulations completed!"
 echo "=========================================="

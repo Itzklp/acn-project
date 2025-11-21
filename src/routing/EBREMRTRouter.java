@@ -2,267 +2,342 @@ package routing;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import core.Connection;
 import core.DTNHost;
 import core.Message;
 import core.Settings;
 import core.SimClock;
+import routing.util.EMRTUtility;
 
 /**
- * Implementation of the Enhanced Message Replication Technique (EMRT) applied to
- * Encounter-Based Routing (EBR).
- * * Based on: Hasan, S. et al. "Enhanced Message Replication Technique for DTN Routing Protocols", 
- * Sensors 2023, 23, 922.
+ * Encounter-Based Routing (EBR) with Enhanced Message Replication Technique (EMRT)
+ * 
+ * Based on the paper:
+ * "Enhanced Message Replication Technique for DTN Routing Protocols"
+ * by Hasan et al., Sensors 2023
+ * 
+ * EBR forwards messages based on encounter history. EMRT enhances this by
+ * dynamically adjusting the number of replicas based on network conditions.
  */
-public class EBREMRTRouter extends EncounterBasedRouter {
-
-    /** Namespace for settings */
-    public static final String EBREMRT_NS = "EBREMRT";
+public class EBREMRTRouter extends ActiveRouter {
     
-    /** Parameter for initial base copies (m_init) - Default: 11 (from paper for EBR) */
-    public static final String M_INIT_S = "m_init";
+    /** EBR router's setting namespace */
+    public static final String EBR_NS = "EBREMRTRouter";
+    /** Initial number of copies setting */
+    public static final String NROF_COPIES = "nrofCopies";
+    /** Message property key for remaining copies */
+    public static final String MSG_COUNT_PROPERTY = EBR_NS + ".copies";
+    /** Encounter rate decay factor */
+    public static final String ALPHA_DECAY = "alphaDecay";
     
-    /** Parameter for alpha (smoothing factor) - Default: 0.85 (from paper) */
-    public static final String ALPHA_S = "alpha";
+    /** Default initial number of copies (from paper: 11) */
+    private static final int DEFAULT_NROF_COPIES = 11;
+    /** Default decay factor */
+    private static final double DEFAULT_ALPHA_DECAY = 0.98;
     
-    /** Parameter for update interval in seconds - Default: 30s (from paper) */
-    public static final String UPDATE_INTERVAL_S = "updateInterval";
-
-    /** Message property key for the number of replicas */
-    public static final String NUM_REPLICAS_KEY = "EBREMRT.replicas";
-
-    // EMRT Parameters
-    private int mInit;
-    private double alpha;
-    private double updateInterval;
-
-    // State variables
-    private double lastUpdateTime;
-    private int cwc; // Current Window Counter (encounters in current interval)
-    private double ev; // Encounter Value (smoothed history)
+    protected int initialNrofCopies;
+    protected double alphaDecay;
     
-    // Buffer history for B_avg (Average Buffer of encountered nodes)
-    private double currentWindowBufferSum;
-    private int currentWindowBufferCount;
-    private double bAvg; // Moving average of buffer availability
-
+    /** EMRT utility for dynamic replica calculation */
+    protected EMRTUtility emrt;
+    
+    /** Encounter history: Maps host to encounter value */
+    protected Map<DTNHost, Double> encounterHistory;
+    
+    /** Last encounter time with each host */
+    protected Map<DTNHost, Double> lastEncounterTime;
+    
+    /**
+     * Constructor. Creates a new message router based on the settings in
+     * the given Settings object.
+     * @param s The settings object
+     */
     public EBREMRTRouter(Settings s) {
         super(s);
-        Settings ns = new Settings(EBREMRT_NS);
-        this.mInit = ns.getInt(M_INIT_S, 11);
-        this.alpha = ns.getDouble(ALPHA_S, 0.85);
-        this.updateInterval = ns.getDouble(UPDATE_INTERVAL_S, 30.0);
+        Settings ebrSettings = new Settings(EBR_NS);
         
-        this.cwc = 0;
-        this.ev = 0.0;
-        this.lastUpdateTime = 0.0;
-        this.currentWindowBufferSum = 0.0;
-        this.currentWindowBufferCount = 0;
-        this.bAvg = 0.5; // Initialize with assumed 50% availability
+        if (ebrSettings.contains(NROF_COPIES)) {
+            initialNrofCopies = ebrSettings.getInt(NROF_COPIES);
+        } else {
+            initialNrofCopies = DEFAULT_NROF_COPIES;
+        }
+        
+        if (ebrSettings.contains(ALPHA_DECAY)) {
+            alphaDecay = ebrSettings.getDouble(ALPHA_DECAY);
+        } else {
+            alphaDecay = DEFAULT_ALPHA_DECAY;
+        }
+        
+        // Initialize EMRT
+        this.emrt = new EMRTUtility(initialNrofCopies);
+        
+        this.encounterHistory = new HashMap<>();
+        this.lastEncounterTime = new HashMap<>();
     }
-
+    
+    /**
+     * Copy constructor.
+     * @param r The router prototype where setting values are copied from
+     */
     protected EBREMRTRouter(EBREMRTRouter r) {
         super(r);
-        this.mInit = r.mInit;
-        this.alpha = r.alpha;
-        this.updateInterval = r.updateInterval;
-        this.cwc = r.cwc;
-        this.ev = r.ev;
-        this.lastUpdateTime = r.lastUpdateTime;
-        this.bAvg = r.bAvg;
-        this.currentWindowBufferSum = r.currentWindowBufferSum;
-        this.currentWindowBufferCount = r.currentWindowBufferCount;
+        this.initialNrofCopies = r.initialNrofCopies;
+        this.alphaDecay = r.alphaDecay;
+        this.emrt = new EMRTUtility(r.emrt);
+        this.encounterHistory = new HashMap<>();
+        this.lastEncounterTime = new HashMap<>();
     }
-
+    
     @Override
-    public void update() {
-        super.update();
+    public Message messageTransferred(String id, DTNHost from) {
+        Message msg = super.messageTransferred(id, from);
         
-        // Algorithm 1: Update EV periodically
-        if (SimClock.getTime() - lastUpdateTime >= updateInterval) {
-            // Update EV: EV = alpha * CWC + (1 - alpha) * EV
-            this.ev = this.alpha * this.cwc + (1 - this.alpha) * this.ev;
-            
-            // Update B_avg (Average buffer of nodes encountered in this window)
-            if (this.currentWindowBufferCount > 0) {
-                double windowAvg = this.currentWindowBufferSum / this.currentWindowBufferCount;
-                // Smooth update for B_avg as well
-                this.bAvg = this.alpha * windowAvg + (1 - this.alpha) * this.bAvg;
-            }
-            
-            // Reset counters for next window
-            this.cwc = 0;
-            this.currentWindowBufferSum = 0.0;
-            this.currentWindowBufferCount = 0;
-            this.lastUpdateTime = SimClock.getTime();
+        // Initialize copies if needed
+        Integer nrofCopies = (Integer) msg.getProperty(MSG_COUNT_PROPERTY);
+        if (nrofCopies == null) {
+            nrofCopies = emrt.calculateReplicas(msg);
+            msg.updateProperty(MSG_COUNT_PROPERTY, nrofCopies);
         }
+        
+        return msg;
     }
-
+    
+    @Override
+    public boolean createNewMessage(Message msg) {
+        makeRoomForNewMessage(msg.getSize());
+        
+        // Use EMRT to calculate dynamic number of copies
+        int nrofCopies = emrt.calculateReplicas(msg);
+        msg.addProperty(MSG_COUNT_PROPERTY, nrofCopies);
+        
+        // Update energy
+        double currentEnergy = emrt.getEnergy();
+        emrt.setEnergy(currentEnergy - 0.01);
+        
+        addToMessages(msg, true);
+        return true;
+    }
+    
     @Override
     public void changedConnection(Connection con) {
         super.changedConnection(con);
         
         if (con.isUp()) {
-            // Increment CWC (Current Window Counter) for every new connection
-            this.cwc++;
+            DTNHost otherHost = con.getOtherNode(getHost());
             
-            // Collect buffer info from the other node for B_avg
-            DTNHost other = con.getOtherNode(getHost());
-            // We calculate buffer availability ratio (0.0 to 1.0)
-            // 1.0 means fully empty, 0.0 means fully full.
-            // Paper says "buffer availability", so free space is the metric.
-            double freeBufferRatio = (double) other.getRouter().getFreeBufferSize() / other.getRouter().getBufferSize();
+            // Update encounter history
+            updateEncounterValue(otherHost);
             
-            this.currentWindowBufferSum += freeBufferRatio;
-            this.currentWindowBufferCount++;
-        }
-    }
-
-    /**
-     * Creates a new message with a dynamic number of initial replicas 
-     * calculated using the EMRT formula.
-     */
-    @Override
-    public boolean createNewMessage(Message msg) {
-        makeRoomForNewMessage(msg.getSize());
-        
-        msg.setTtl(this.msgTtl);
-        
-        // --- EMRT FORMULA IMPLEMENTATION ---
-        // Formula: Mi = m_init * (EVs + B_avg) / (TTL_i + Es)
-        
-        // Normalization/Unit handling:
-        // EV: Count of encounters (approx 0-50)
-        // B_avg: Scaled to 0-100 (percentage) to match magnitude of EV
-        // TTL: Scaled to Hours? (60 mins = 1 hr). If we use seconds, it dominates.
-        //      Let's normalize to "Time Units" roughly matching Energy. 
-        //      Using Ratio of initial TTL (0.0 - 1.0) * 100 for percentage.
-        // Es: Energy Percentage (0-100)
-        
-        double bVal = this.bAvg * 100.0; // 0 to 100
-        
-        // Normalized TTL (percentage of max TTL remaining, initially 100)
-        // Or simply raw TTL in minutes to match magnitude of Energy? 
-        // Paper example uses TTL=8. 8 mins? 8 hours? 
-        // We will use TTL in Minutes.
-        double ttlVal = msg.getTtl() / 60; // Scale TTL to Hours (60 min = 1.0 hour)        
-        // Energy Level (assuming simulation uses 0-100 or similar scale)
-        // ONE's energy model might differ. We assume current/max * 100.
-        double energyVal = 5.0; // Default if no energy model
-        // Check if energy model exists
-        // (This requires casting or accessing a known energy model interface if strictly needed,
-        //  but for standard ONE ActiveRouter, we might not have direct access. 
-        //  We assume full energy if not available or implement basic check).
-        
-        // Calculate M_i
-        double numerator = this.ev + bVal;
-        double denominator = ttlVal + energyVal;
-        
-        // Avoid division by zero
-        if (denominator < 1.0) denominator = 1.0;
-        
-        double miDouble = this.mInit * (numerator / denominator);
-        
-        // Clamp M_i to reasonable bounds (at least 1, at most mInit * 3)
-        int initialCopies = (int) Math.round(miDouble);
-        if (initialCopies < 1) initialCopies = 1;
-        
-        // Set the replicas property
-        msg.addProperty(NUM_REPLICAS_KEY, initialCopies);
-        msg.addProperty(EncounterBasedRouter.MSG_DELIVERY_PROB, 0.0); // Also set EBR prob
-
-        addToMessages(msg, true);
-        return true;
-    }
-
-    @Override
-    public Message messageTransferred(String id, DTNHost from) {
-        Message msg = super.messageTransferred(id, from);
-        // When we receive a message, we must ensure it has the replica key
-        // If it was created by a non-EMRT router, default to 1
-        if (msg.getProperty(NUM_REPLICAS_KEY) == null) {
-            msg.addProperty(NUM_REPLICAS_KEY, 1);
-        }
-        return msg;
-    }
-
-    /**
-     * Try to transfer message to other node.
-     * Combines EBR forwarding strategy (probabilistic) with EMRT copy limiting.
-     */
-    @Override
-    protected void tryMessageToConnection(Message msg, Connection con) {
-        Integer replicas = (Integer) msg.getProperty(NUM_REPLICAS_KEY);
-        if (replicas == null) replicas = 1;
-
-        // If we only have 1 copy, we are in "Wait" phase (Direct Delivery only)
-        // unless we want to forward the single copy (forwarding vs replication).
-        // EMRT usually implies "Spray" phase. 
-        // If replicas > 1, we can spray (binary spray).
-        
-        DTNHost other = con.getOtherNode(getHost());
-        DTNHost dest = msg.getTo();
-
-        if (other == dest) {
-            startTransfer(msg, con);
-            return;
-        }
-
-        // EBR Logic: Check delivery probabilities
-        // We assume EncounterBasedRouter has 'deliveryProbabilities' map
-        // This calls getPredFor from parent EncounterBasedRouter
-        double myProb = getPredFor(dest);
-        double otherProb = 0.0;
-        
-        if (other.getRouter() instanceof EncounterBasedRouter) {
-             EncounterBasedRouter otherRouter = (EncounterBasedRouter)other.getRouter();
-             otherProb = otherRouter.getPredFor(dest);
-        }
-
-        if (replicas > 1) {
-            // SPRAY PHASE: Replicate if neighbor is better or just to spread?
-            // EMRT paper implies "Spray and Wait" style + EBR utility.
-            // "When combined with EBR... directs replicas towards high density... controls replicas based on capability"
-            // Binary Spray logic:
-            int copiesToTransfer = replicas / 2;
+            // Update EMRT
+            emrt.updateOnEncounter(otherHost);
             
-            // Condition to forward: Neighbor has higher probability OR we just want to spread (Spray)?
-            // Standard Spray and Wait sprays to *anyone*. 
-            // EBR-EMRT implies spraying to *better* candidates?
-            // Paper says: "directing replicas towards high-density areas".
-            // We will use EBR check: forward if otherProb > myProb OR if we are just spreading early?
-            // To stick to "EBR" nature, we prefer better nodes.
-            
-            if (otherProb > myProb) {
-                // Modify our copy count
-                msg.updateProperty(NUM_REPLICAS_KEY, replicas - copiesToTransfer);
-                
-                // Create copy for valid transfer
-                Message copy = msg.replicate();
-                copy.updateProperty(NUM_REPLICAS_KEY, copiesToTransfer);
-                
-                startTransfer(copy, con);
-            }
-        } 
-        else {
-            // WAIT PHASE: Single copy left. 
-            // Only forward if other is Destination (handled above) or *significantly* better (Focus)?
-            // Pure Spray and Wait does not forward the last copy.
-            // EBR usually forwards single copy if prob is better.
-            if (otherProb > myProb) {
-                // Forward the single copy (handover)
-                startTransfer(msg, con);
-            }
+            // Decay all encounter values
+            decayEncounterValues();
         }
     }
     
-    // REMOVED: private double getPredFor(DTNHost dest)
-    // We now rely on the public getPredFor from EncounterBasedRouter
-
+    /**
+     * Update encounter value for a host
+     */
+    private void updateEncounterValue(DTNHost host) {
+        double currentTime = SimClock.getTime();
+        Double lastTime = lastEncounterTime.get(host);
+        Double currentValue = encounterHistory.get(host);
+        
+        if (currentValue == null) {
+            currentValue = 0.0;
+        }
+        
+        // Increment encounter value
+        currentValue += 1.0;
+        
+        encounterHistory.put(host, currentValue);
+        lastEncounterTime.put(host, currentTime);
+    }
+    
+    /**
+     * Decay all encounter values
+     */
+    private void decayEncounterValues() {
+        for (DTNHost host : encounterHistory.keySet()) {
+            double value = encounterHistory.get(host);
+            value *= alphaDecay;
+            encounterHistory.put(host, value);
+        }
+    }
+    
+    /**
+     * Get encounter value for a host
+     */
+    private double getEncounterValue(DTNHost host) {
+        Double value = encounterHistory.get(host);
+        return (value != null) ? value : 0.0;
+    }
+    
+    @Override
+    public void update() {
+        super.update();
+        
+        if (isTransferring() || !canStartTransfer()) {
+            return;
+        }
+        
+        // Try to deliver messages to final recipients
+        if (exchangeDeliverableMessages() != null) {
+            return;
+        }
+        
+        // Try to forward messages based on encounter history
+        tryForwardMessages();
+    }
+    
+    /**
+     * Try to forward messages to connected hosts based on encounter values
+     */
+    private Connection tryForwardMessages() {
+        List<Message> messages = new ArrayList<Message>(getMessageCollection());
+        
+        // Sort by encounter value (higher first)
+        Collections.sort(messages, new EncounterValueComparator());
+        
+        // For all messages
+        for (Message m : messages) {
+            // For all connected hosts
+            for (Connection con : getConnections()) {
+                DTNHost other = con.getOtherNode(getHost());
+                EBREMRTRouter othRouter = (EBREMRTRouter) other.getRouter();
+                
+                if (othRouter.isTransferring()) {
+                    continue;
+                }
+                
+                if (othRouter.hasMessage(m.getId())) {
+                    continue;
+                }
+                
+                // Check if we should forward this message
+                if (shouldForwardMessage(m, other)) {
+                    // Try to start transfer
+                    if (startTransfer(m, con) == RCV_OK) {
+                        return con;
+                    }
+                }
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * Determine if a message should be forwarded to a host
+     */
+    protected boolean shouldForwardMessage(Message m, DTNHost otherHost) {
+        Integer nrofCopies = (Integer) m.getProperty(MSG_COUNT_PROPERTY);
+        
+        if (nrofCopies == null) {
+            nrofCopies = emrt.calculateReplicas(m);
+            m.updateProperty(MSG_COUNT_PROPERTY, nrofCopies);
+        }
+        
+        // Only forward if we have copies left
+        if (nrofCopies <= 1) {
+            return false;
+        }
+        
+        // Get encounter values
+        double myEncounter = getEncounterValueForDestination(m.getTo());
+        
+        EBREMRTRouter othRouter = (EBREMRTRouter) otherHost.getRouter();
+        double otherEncounter = othRouter.getEncounterValueForDestination(m.getTo());
+        
+        // Forward if other has better encounter history with destination
+        return otherEncounter > myEncounter;
+    }
+    
+    /**
+     * Get encounter value for the destination of a message
+     * This considers both direct encounters and transitive encounters
+     */
+    private double getEncounterValueForDestination(DTNHost destination) {
+        double directValue = getEncounterValue(destination);
+        
+        // Consider transitive encounters (simplified)
+        double transitiveValue = 0.0;
+        int transitiveCount = 0;
+        
+        for (Map.Entry<DTNHost, Double> entry : encounterHistory.entrySet()) {
+            DTNHost intermediateHost = entry.getKey();
+            if (intermediateHost != destination) {
+                EBREMRTRouter intermRouter = (EBREMRTRouter) intermediateHost.getRouter();
+                double intermValue = intermRouter.getEncounterValue(destination);
+                if (intermValue > 0) {
+                    transitiveValue += intermValue * entry.getValue();
+                    transitiveCount++;
+                }
+            }
+        }
+        
+        if (transitiveCount > 0) {
+            transitiveValue /= transitiveCount;
+        }
+        
+        // Combine direct and transitive (weight direct more heavily)
+        return 0.7 * directValue + 0.3 * transitiveValue;
+    }
+    
+    @Override
+    protected int startTransfer(Message m, Connection con) {
+        int retVal = super.startTransfer(m, con);
+        
+        if (retVal == RCV_OK) {
+            // Update copy count
+            Integer nrofCopies = (Integer) m.getProperty(MSG_COUNT_PROPERTY);
+            
+            if (nrofCopies == null) {
+                nrofCopies = emrt.calculateReplicas(m);
+            }
+            
+            // Give away one copy
+            m.updateProperty(MSG_COUNT_PROPERTY, nrofCopies - 1);
+            
+            // Update energy
+            double currentEnergy = emrt.getEnergy();
+            emrt.setEnergy(currentEnergy - 0.05);
+        }
+        
+        return retVal;
+    }
+    
     @Override
     public EBREMRTRouter replicate() {
         return new EBREMRTRouter(this);
+    }
+    
+    /**
+     * Comparator for sorting messages by encounter value
+     */
+    private class EncounterValueComparator implements Comparator<Message> {
+        public int compare(Message m1, Message m2) {
+            DTNHost dest1 = m1.getTo();
+            DTNHost dest2 = m2.getTo();
+            
+            double ev1 = getEncounterValueForDestination(dest1);
+            double ev2 = getEncounterValueForDestination(dest2);
+            
+            // Higher encounter value first
+            if (ev1 > ev2) {
+                return -1;
+            } else if (ev1 < ev2) {
+                return 1;
+            } else {
+                return 0;
+            }
+        }
     }
 }

@@ -1,0 +1,132 @@
+#
+# Enhanced Message Replication Technique (EMRT) Configuration
+# Based on the paper by Hasan et al., Sensors 2023
+#
+
+# Simulation settings
+Scenario.name = EMRT_Comparison
+Scenario.simulateConnections = true
+Scenario.updateInterval = 0.1
+# 12 hours simulation time
+Scenario.endTime = 5000
+
+# World settings
+# Helsinki, Finland, 5 × 3 km²
+MovementModel.worldSize = 5000, 3000
+MovementModel.warmup = 1000
+
+# Interface settings
+# 802.11n characteristics (54 Mbps = 54000000 bps, 140m range)
+btInterface.type = SimpleBroadcastInterface
+btInterface.transmitSpeed = 54M
+btInterface.transmitRange = 140
+
+# Message settings
+# Message size: 100 KB
+Events1.size = 100k
+# Message TTL: 60 minutes (3600 seconds)
+Events1.ttl = 3600
+# Message creation rate: one message per 25-35 seconds
+Events1.interval = 25,35
+
+# Group settings
+Scenario.nrofHostGroups = 5
+
+# Common settings for all groups
+Group.movementModel = RandomWaypoint
+Group.router = [SprayAndWaitEMRTRouter, EBREMRTRouter, DBRPEMRTRouter]
+Group.bufferSize = 20M
+Group.nrofInterfaces = 1
+Group.interface1 = btInterface
+# Generate one message per 25-35 seconds
+Group.msgTtl = 3600
+
+# Pedestrian group
+Group1.groupID = p
+Group1.speed = 0.5, 1.5
+Group1.nrofHosts = [50, 100, 150, 200, 250]
+
+# Vehicle group
+Group2.groupID = v
+Group2.speed = 2.7, 13.9
+Group2.nrofHosts = 0
+
+# Tram group (if needed)
+Group3.groupID = t
+Group3.speed = 7, 10
+Group3.nrofHosts = 0
+
+# Test groups for different protocols
+Group4.groupID = test1
+Group4.nrofHosts = 0
+
+Group5.groupID = test2
+Group5.nrofHosts = 0
+
+# Message generation
+Events.nrof = 1
+Events1.class = MessageEventGenerator
+Events1.hosts = 0,[Group1.nrofHosts]
+Events1.tohosts = 0,[Group1.nrofHosts]
+Events1.prefix = M
+
+# EMRT Utility settings
+EMRTUtility.alpha = 0.85
+EMRTUtility.updateInterval = 30
+
+# SprayAndWait EMRT Router settings
+SprayAndWaitEMRTRouter.nrofCopies = 8
+SprayAndWaitEMRTRouter.binaryMode = true
+EMRTUtility.initReplicas = 8
+
+# EBR EMRT Router settings
+EBREMRTRouter.nrofCopies = 11
+EBREMRTRouter.alphaDecay = 0.98
+# For EBR, set init replicas to 11
+# EMRTUtility.initReplicas = 11
+
+# DBRP EMRT Router settings
+DBRPEMRTRouter.nrofCopies = 11
+DBRPEMRTRouter.alphaDecay = 0.98
+DBRPEMRTRouter.destinationWeight = 2.0
+DBRPEMRTRouter.nonDestinationWeight = 1.0
+# For DBRP, set init replicas to 11
+# EMRTUtility.initReplicas = 11
+
+# Movement model settings
+MapRouteMovement.nrofMapFiles = 1
+MapRouteMovement.mapFile1 = data/helsinki_map.wkt
+
+# Reports
+Report.nrofReports = 2
+Report.warmup = 0
+Report.reportDir = reports/emrt_results/
+
+# Delivery ratio report
+Report.report1 = MessageStatsReport
+
+# Latency report
+Report.report2 = MessageDelayReport
+
+
+# GUI settings (if using GUI)
+GUI.UnderlayImage.fileName = data/helsinki_underlay.png
+GUI.UnderlayImage.offset = 64, 20
+GUI.UnderlayImage.scale = 4.75
+GUI.UnderlayImage.rotate = -0.015
+
+# Optimization settings
+Optimization.cellSizeMult = 5
+Optimization.randomizeUpdateOrder = true
+# --- Experiment Overrides ---
+Group.router = DBRPEMRTRouter
+Group1.nrofHosts = 66
+Group2.nrofHosts = 66
+Group3.nrofHosts = 66
+Events1.hosts = 0,197
+Events1.tohosts = 0,197
+Scenario.name = DBRPEMRTRouter_200
+Report.reportDir = reports/emrt/DBRPEMRTRouter/200
+DBRPEMRT.m_init = 4
+DBRPEMRT.alpha = 0.85
+DBRPEMRT.updateInterval = 30
