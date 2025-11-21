@@ -173,3 +173,120 @@ def plot_metric(metric, ylabel, title):
 plot_metric("delivery", "Delivery Ratio", "Nodes vs Delivery Ratio")
 plot_metric("overhead", "Overhead Ratio", "Nodes vs Overhead Ratio")
 plot_metric("latency", "Average Latency (ms)", "Nodes vs Average Latency")
+# --------------------------------------------------
+# STEP 5 — Derived Metric Plots
+# --------------------------------------------------
+
+def plot_derived(metric_name, ylabel, title):
+    plt.figure(figsize=(8, 5))
+    color_map = {}
+
+    # ------------ BASE PROTOCOLS ------------
+    for proto in base_protocols:
+        data = protocols.get(proto, {})
+        nodes_sorted = sorted(data.keys())
+
+        if len(nodes_sorted) == 0:
+            continue
+
+        # Compute derived metric
+        values = []
+        for n in nodes_sorted:
+            d = data[n]["delivery"]
+            o = data[n]["overhead"]
+            l = data[n]["latency"]
+
+            if metric_name == "d_by_l":
+                values.append(d * (1/l))
+            elif metric_name == "d_by_o":
+                values.append(d * (1/o))
+            elif metric_name == "d_by_l_o":
+                values.append(d * (1/l) * (1/o))
+
+        line = plt.plot(
+            nodes_sorted,
+            values,
+            marker='o',
+            markersize=7,
+            label=proto,
+            alpha=0.90,
+            linewidth=2,
+        )
+
+        color_map[proto] = line[0].get_color()
+
+    # ------------ EMRT PROTOCOLS ------------
+    for proto in emrt_protocols:
+        data = protocols.get(proto, {})
+        nodes_sorted = sorted(data.keys())
+
+        if len(nodes_sorted) == 0:
+            continue
+
+        match = None
+        reduced = proto.lower().replace("emrt", "")
+        for b in base_protocols:
+            if b.lower() in reduced:
+                match = b
+                break
+
+        color = color_map.get(match, None)
+
+        values = []
+        for n in nodes_sorted:
+            d = data[n]["delivery"]
+            o = data[n]["overhead"]
+            l = data[n]["latency"]
+
+            if metric_name == "d_by_l":
+                values.append(d * (1/l))
+            elif metric_name == "d_by_o":
+                values.append(d * (1/o))
+            elif metric_name == "d_by_l_o":
+                values.append(d * (1/l) * (1/o))
+
+        plt.plot(
+            nodes_sorted,
+            values,
+            marker='o',
+            markersize=7,
+            linestyle='dotted',
+            label=proto,
+            color=color,
+            alpha=0.55,
+            linewidth=2,
+        )
+
+    plt.title(title)
+    plt.xlabel("Number of Nodes")
+    plt.ylabel(ylabel)
+    plt.grid(True)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
+
+# --------------------------------------------------
+# STEP 6 — Generate Derived Metric Graphs
+# --------------------------------------------------
+
+# 4) Delivery ratio × (1 / latency)
+plot_derived(
+    "d_by_l",
+    "Delivery × (1/Latency)",
+    "Nodes vs Delivery Ratio × (1 / Latency Avg)"
+)
+
+# 5) Delivery ratio × (1 / overhead)
+plot_derived(
+    "d_by_o",
+    "Delivery × (1/Overhead)",
+    "Nodes vs Delivery Ratio × (1 / Overhead Ratio)"
+)
+
+# 6) Delivery ratio × (1 / latency) × (1 / overhead)
+plot_derived(
+    "d_by_l_o",
+    "Delivery × (1/Latency) × (1/Overhead)",
+    "Nodes vs Delivery × (1/Latency) × (1/Overhead)"
+)

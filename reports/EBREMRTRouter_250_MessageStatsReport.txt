@@ -1,0 +1,20 @@
+Message stats for scenario EBREMRTRouter_250
+sim_time: 5000.0000
+created: 170
+started: 31679
+relayed: 31677
+aborted: 0
+dropped: 0
+removed: 0
+delivered: 158
+delivery_prob: 0.9294
+response_prob: 0.0000
+overhead_ratio: 199.4873
+latency_avg: 393.0253
+latency_med: 351.9000
+hopcount_avg: 3.8544
+hopcount_med: 4
+buffertime_avg: NaN
+buffertime_med: NaN
+rtt_avg: NaN
+rtt_med: NaN
